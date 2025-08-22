@@ -7,7 +7,8 @@
     "node": ">=18"
   },
   "dependencies": {
-    "turndown": "^7.2.0",
-    "ioredis": "^5.3.2"
+    "@upstash/redis": "^1.35.3",
+    "ioredis": "^5.3.2",
+    "turndown": "^7.2.0"
   }
 }

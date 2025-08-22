@@ -157,7 +157,19 @@ export default async function handler(req, res) {
     return res.status(404).json({ error: `No mapping for username '${username}'` });
   }
 
-  const repoFull = await redis.get(`selected-repo:${userId}`);
+// 1. Grab repo from Redis
+const repoFull = await redis.get(`selected-repo:${userId}`);
+console.log("RAW REPO", { repoFull });
+
+// 2. Split into owner/repo (this is the new part)
+const [owner, repo] = (repoFull || "").replace(/['"]+/g, "").trim().split("/");
+console.log("OWNER/REPO", { owner, repo });
+
+// 3. Use them when calling GitHub API
+if (!owner || !repo) {
+  throw new Error(`Invalid repo string: ${repoFull}`);
+}
+
   if (!repoFull) {
     console.log("404 no selected repo", {
       triedKey: `selected-repo:${userId}`,

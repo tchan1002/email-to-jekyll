@@ -64,6 +64,13 @@ function toSlug(s) {
     .replace(/^-+|-+$/g, "");
 }
 
+// Remove stray CSS rules that sometimes appear in plaintext exports
+function stripCssNoise(s) {
+  if (!s) return s;
+  // Drop single-line CSS rules like: p {margin-top:0; margin-bottom:0;}
+  return s.replace(/^[^{\n]{1,80}\{[^}]*\}\s*$/gm, "").trim();
+}
+
 function dateParts(d = new Date()) {
   const yyyy = d.getUTCFullYear();
   const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
@@ -211,15 +218,31 @@ if (!owner || !repo) {
   }
 
   // html/text -> markdown
-  const turndown = new TurndownService();
-  const bodyMd = (html ? turndown.turndown(html) : text || "").trim();
+ // Choose the cleanest body: prefer plain text; fallback to html->md
+let bodyClean = "";
+if (text) {
+  // Use plain text, normalize encoding/newlines, strip CSS-y noise
+  bodyClean = Buffer.from(String(text), "utf8").toString()
+    .replace(/\r\n/g, "\n");
+  bodyClean = stripCssNoise(bodyClean);
+} else if (html) {
+  // Remove <style> blocks before converting to Markdown
+  const turndown = new TurndownService({
+    headingStyle: "atx",
+    codeBlockStyle: "fenced",
+  });
+  const htmlNoStyle = String(html).replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+  bodyClean = turndown.turndown(htmlNoStyle);
+}
+// Final tidy
+bodyClean = bodyClean.trim();
 
   // make Jekyll content + path
   const now = new Date();
   const { yyyy, mm, dd, hh, mi, ss } = dateParts(now);
   const dateISO = `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
   const fm = makeFrontMatter({ title: subject, dateISO });
-  const contentMd = fm + bodyMd + "\n";
+  const contentMd = fm + bodyClean + "\n";
   const slug = toSlug(subject) || "email-post";
   const path = `_posts/${yyyy}-${mm}-${dd}-${slug}.md`;
 

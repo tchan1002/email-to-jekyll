@@ -31,7 +31,7 @@ function makeFrontMatter({ title, dateISO, categories = [] }) {
     `title: "${safeTitle}"`,
     `date: ${dateISO} ${TZ}`,
     categories.length ? `categories: [${categories.map(c => `"${c}"`).join(", ")}]` : null,
-    "---",
+    "---", 
     "",
   ].filter(Boolean).join("\n");
 }
@@ -100,7 +100,7 @@ export default async function handler(req, res) {
   const { yyyy, mm, dd, hh, mi, ss } = dateParts(now);
   const dateISO = `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
   const fm = makeFrontMatter({ title: subject, dateISO });
-  const contentMd = fm + bodyMd + "\n";
+  const contentMd = fm + "\n" + bodyMd + "\n";
   const slug = toSlug(subject) || "email-post";
   const path = `_posts/${yyyy}-${mm}-${dd}-${slug}.md`;
 

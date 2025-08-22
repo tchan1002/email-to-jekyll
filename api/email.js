@@ -14,6 +14,7 @@ function toSlug(s) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
+
 function dateParts(d = new Date()) {
   const yyyy = d.getUTCFullYear();
   const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
@@ -23,18 +24,23 @@ function dateParts(d = new Date()) {
   const ss = String(d.getUTCSeconds()).padStart(2, "0");
   return { yyyy, mm, dd, hh, mi, ss };
 }
+
+// Build correct Jekyll front matter block
 function makeFrontMatter({ title, dateISO, categories = [] }) {
   const safeTitle = String(title || "Untitled").replace(/"/g, '\\"');
-  return [
+  const lines = [
     "---",
     "layout: post",
     `title: "${safeTitle}"`,
     `date: ${dateISO} ${TZ}`,
-    categories.length ? `categories: [${categories.map(c => `"${c}"`).join(", ")}]` : null,
-    "---", 
-    "",
-  ].filter(Boolean).join("\n");
+  ];
+  if (categories && categories.length) {
+    lines.push(`categories: [${categories.map((c) => `"${c}"`).join(", ")}]`);
+  }
+  return lines.join("\n") + "\n---\n\n";
 }
+
+// parse body
 function readCT(req) {
   return String(req.headers["content-type"] || "").toLowerCase();
 }
@@ -47,11 +53,15 @@ async function parseBody(req) {
   const ct = readCT(req);
   if (req.body && typeof req.body === "object") return req.body;
   if (typeof req.body === "string") {
-    if (ct.includes("application/json")) { try { return JSON.parse(req.body); } catch { return {}; } }
+    if (ct.includes("application/json")) {
+      try { return JSON.parse(req.body); } catch { return {}; }
+    }
     if (ct.includes("application/x-www-form-urlencoded")) return parseQS(req.body);
   }
   const raw = await readRaw(req);
-  if (ct.includes("application/json")) { try { return JSON.parse(raw); } catch { return {}; } }
+  if (ct.includes("application/json")) {
+    try { return JSON.parse(raw); } catch { return {}; }
+  }
   if (ct.includes("application/x-www-form-urlencoded")) return parseQS(raw);
   try { return JSON.parse(raw); } catch { return parseQS(raw); }
 }
@@ -77,7 +87,10 @@ export default async function handler(req, res) {
   const text = b.text || b.plain || b.body || "";
 
   if (!to || !subject || (!html && !text)) {
-    return res.status(400).json({ error: "Missing to/subject/body", got: { to: !!to, subject: !!subject, html: !!html, text: !!text } });
+    return res.status(400).json({
+      error: "Missing to/subject/body",
+      got: { to: !!to, subject: !!subject, html: !!html, text: !!text },
+    });
   }
 
   // username: "name@inbox.scotty.ink" -> "name"
@@ -93,28 +106,45 @@ export default async function handler(req, res) {
 
   // html/text -> markdown
   const turndown = new TurndownService();
-  const bodyMd = (html ? turndown.turndown(html) : text).trim();
+  const bodyMd = (html ? turndown.turndown(html) : text || "").trim();
 
   // make Jekyll content + path
   const now = new Date();
   const { yyyy, mm, dd, hh, mi, ss } = dateParts(now);
   const dateISO = `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
   const fm = makeFrontMatter({ title: subject, dateISO });
-  const contentMd = fm + "\n" + bodyMd + "\n";
+  const contentMd = fm + bodyMd + "\n";
   const slug = toSlug(subject) || "email-post";
   const path = `_posts/${yyyy}-${mm}-${dd}-${slug}.md`;
 
-  // commit
+  // commit (create or update)
   const octo = new Octokit({ auth: GITHUB_TOKEN });
+
   try {
+    let sha;
+    try {
+      const { data } = await octo.repos.getContent({ owner, repo, path });
+      if (data && !Array.isArray(data) && data.sha) sha = data.sha;
+    } catch (err) {
+      if (err.status !== 404) throw err; // only ignore 404
+    }
+
     await octo.repos.createOrUpdateFileContents({
       owner,
       repo,
       path,
       message: `Scotty: ${subject}`,
       content: Buffer.from(contentMd).toString("base64"),
+      ...(sha ? { sha } : {}),
     });
-    return res.status(200).json({ message: "Markdown committed to GitHub!", repo: repoFull, path, username, userId });
+
+    return res.status(200).json({
+      message: "Markdown committed to GitHub!",
+      repo: repoFull,
+      path,
+      username,
+      userId,
+    });
   } catch (e) {
     return res.status(500).json({ error: `GitHub write failed: ${e?.message || String(e)}` });
   }

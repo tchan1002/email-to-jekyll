@@ -219,23 +219,22 @@ if (!owner || !repo) {
 
   // html/text -> markdown
   // --- helpers for Markdown cleanliness ---
-function normalizeBodyForMarkdown(input) {
-  if (!input) return "";
-  let t = String(input);
-
-  // 1) Normalize newlines from any source
-  t = t.replace(/\r\n/g, "\n").replace(/\r/g, "\n"); // Windows/Mac -> LF
-  t = t.replace(/\\n/g, "\n");                        // literal "\n" -> LF
-
-  // 2) Collapse excessive blank lines (keep paragraph breaks)
-  t = t.replace(/\n{3,}/g, "\n\n");
-
-  // 3) Strip trailing spaces/tabs on each line (prevents accidental hard-breaks)
-  t = t.split("\n").map(line => line.replace(/[ \t]+$/g, "")).join("\n");
-
-  // 4) Final tidy
-  return t.trim();
-}
+  function normalizeBodyForMarkdown(input) {
+    if (!input) return "";
+    let t = input.toString("utf8"); // ensure UTF-8
+  
+    // normalize newlines
+    t = t.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\\n/g, "\n");
+  
+    // collapse excessive blank lines
+    t = t.replace(/\n{3,}/g, "\n\n");
+  
+    // strip trailing spaces
+    t = t.split("\n").map(line => line.replace(/[ \t]+$/g, "")).join("\n");
+  
+    return t.trim();
+  }
+  
  // --- choose the cleanest body: prefer text; fallback to html->md ---
 let bodyClean = "";
 if (text) {
@@ -277,7 +276,7 @@ if (text) {
       repo,
       path,
       message: `Scotty: ${subject}`,
-      content: Buffer.from(contentMd).toString("base64"),
+      content: Buffer.from(contentMd, "utf8").toString("base64"), // force UTF-8
       ...(sha ? { sha } : {}),
     });
 

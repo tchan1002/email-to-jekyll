@@ -7,6 +7,35 @@ import { parse as parseQS } from "querystring";
 // ---------- helpers ----------
 const TZ = "+0000"; // keep UTC for now
 
+import Busboy from "busboy";
+
+async function parseMultipart(req) {
+  return new Promise((resolve, reject) => {
+    try {
+      const fields = {};
+      const bb = Busboy({ headers: req.headers });
+
+      bb.on("field", (name, val) => {
+        // SendGrid uses: to, from, subject, text, html, envelope, headers, cc, cc[], etc.
+        fields[name] = val;
+      });
+
+      bb.on("file", (name, file, info) => {
+        // We don't need attachments yet; drain to discard
+        file.on("data", () => {});
+        file.on("end", () => {});
+      });
+
+      bb.on("error", reject);
+      bb.on("close", () => resolve(fields));
+
+      req.pipe(bb);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 function toSlug(s) {
   return String(s || "")
     .toLowerCase()
@@ -51,20 +80,35 @@ async function readRaw(req) {
 }
 async function parseBody(req) {
   const ct = readCT(req);
+
+  if (ct.includes("multipart/form-data")) {
+    return await parseMultipart(req);
+  }
+
   if (req.body && typeof req.body === "object") return req.body;
+
   if (typeof req.body === "string") {
     if (ct.includes("application/json")) {
       try { return JSON.parse(req.body); } catch { return {}; }
     }
-    if (ct.includes("application/x-www-form-urlencoded")) return parseQS(req.body);
+    if (ct.includes("application/x-www-form-urlencoded")) {
+      return parseQS(req.body);
+    }
   }
+
   const raw = await readRaw(req);
+
   if (ct.includes("application/json")) {
     try { return JSON.parse(raw); } catch { return {}; }
   }
-  if (ct.includes("application/x-www-form-urlencoded")) return parseQS(raw);
+  if (ct.includes("application/x-www-form-urlencoded")) {
+    return parseQS(raw);
+  }
+
+  // Fallback: try JSON then QS
   try { return JSON.parse(raw); } catch { return parseQS(raw); }
 }
+
 
 // ---------- handler ----------
 export default async function handler(req, res) {

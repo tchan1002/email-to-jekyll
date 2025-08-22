@@ -36,6 +36,26 @@ async function parseMultipart(req) {
   });
 }
 
+function firstEmailAddress(x) {
+  if (!x) return "";
+  // Arrays → first element
+  if (Array.isArray(x)) x = x[0];
+  let s = String(x).trim();
+
+  // If it has an angle-bracket form: Name <addr@host>
+  const m = s.match(/<([^>]+)>/);
+  if (m && m[1]) s = m[1];
+
+  // Strip surrounding quotes
+  s = s.replace(/^"+|"+$/g, "");
+
+  // If multiple tokens, pick the first that looks like an email
+  const parts = s.split(/[,\s]/).filter(p => p.includes("@"));
+  if (parts.length) s = parts[0];
+
+  return s.toLowerCase();
+}
+
 function toSlug(s) {
   return String(s || "")
     .toLowerCase()
@@ -143,7 +163,19 @@ export default async function handler(req, res) {
   }
 
   // username: "name@inbox.scotty.ink" -> "name"
-  const username = String(to).split(",")[0].trim().split("@")[0];
+  // Prefer envelope.to (array) if SendGrid provided it; else parse "to"
+let toAddr = firstEmailAddress(b.envelope ? (() => {
+  try {
+    const env = JSON.parse(b.envelope);
+    return env?.to?.[0] || b.to;
+  } catch {
+    return b.to;
+  }
+})() : b.to);
+
+const username = (toAddr.split("@")[0] || "").replace(/^"+|"+$/g, "");
+console.log("TO PARSED", { rawTo: b.to, envelope: b.envelope, toAddr, username });
+
   console.log("USERNAME", { username });
 
   // redis lookups

@@ -130,6 +130,11 @@ export default async function handler(req, res) {
   const html = b.html || b.htmlBody || "";
   const text = b.text || b.plain || b.body || "";
 
+  console.log("INBOUND parsed", {
+    to, subject, hasHtml: !!html, hasText: !!text,
+    contentType: String(req.headers["content-type"] || "")
+  });
+
   if (!to || !subject || (!html && !text)) {
     return res.status(400).json({
       error: "Missing to/subject/body",
@@ -139,14 +144,27 @@ export default async function handler(req, res) {
 
   // username: "name@inbox.scotty.ink" -> "name"
   const username = String(to).split(",")[0].trim().split("@")[0];
+  console.log("USERNAME", { username });
 
   // redis lookups
   const redis = new Redis({ url: REST_URL, token: REST_TOKEN });
   const userId = await redis.get(`inbound:${username}`);
-  if (!userId) return res.status(404).json({ error: `No mapping for username '${username}'` });
+  if (!userId) {
+    console.log("404 no mapping for username", {
+      triedKey: `inbound:${username}`,
+      username
+    });
+    return res.status(404).json({ error: `No mapping for username '${username}'` });
+  }
+
   const repoFull = await redis.get(`selected-repo:${userId}`);
-  if (!repoFull) return res.status(404).json({ error: `No selected repo for userId '${userId}'` });
-  const [owner, repo] = String(repoFull).split("/");
+  if (!repoFull) {
+    console.log("404 no selected repo", {
+      triedKey: `selected-repo:${userId}`,
+      userId
+    });
+    return res.status(404).json({ error: `No selected repo for userId '${userId}'` });
+  }
 
   // html/text -> markdown
   const turndown = new TurndownService();

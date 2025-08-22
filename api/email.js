@@ -218,30 +218,44 @@ if (!owner || !repo) {
   }
 
   // html/text -> markdown
- // Choose the cleanest body: prefer plain text; fallback to html->md
+  // --- helpers for Markdown cleanliness ---
+function normalizeBodyForMarkdown(input) {
+  if (!input) return "";
+  let t = String(input);
+
+  // 1) Normalize newlines from any source
+  t = t.replace(/\r\n/g, "\n").replace(/\r/g, "\n"); // Windows/Mac -> LF
+  t = t.replace(/\\n/g, "\n");                        // literal "\n" -> LF
+
+  // 2) Collapse excessive blank lines (keep paragraph breaks)
+  t = t.replace(/\n{3,}/g, "\n\n");
+
+  // 3) Strip trailing spaces/tabs on each line (prevents accidental hard-breaks)
+  t = t.split("\n").map(line => line.replace(/[ \t]+$/g, "")).join("\n");
+
+  // 4) Final tidy
+  return t.trim();
+}
+ // --- choose the cleanest body: prefer text; fallback to html->md ---
 let bodyClean = "";
 if (text) {
-  // Use plain text, normalize encoding/newlines, strip CSS-y noise
-  bodyClean = Buffer.from(String(text), "utf8").toString()
-    .replace(/\r\n/g, "\n");
-  bodyClean = stripCssNoise(bodyClean);
+  bodyClean = normalizeBodyForMarkdown(text);
 } else if (html) {
-  // Remove <style> blocks before converting to Markdown
   const turndown = new TurndownService({
     headingStyle: "atx",
     codeBlockStyle: "fenced",
   });
+  // strip <style> so no CSS leaks into output
   const htmlNoStyle = String(html).replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
-  bodyClean = turndown.turndown(htmlNoStyle);
+  bodyClean = normalizeBodyForMarkdown(turndown.turndown(htmlNoStyle));
 }
-// Final tidy
-bodyClean = bodyClean.trim();
 
   // make Jekyll content + path
   const now = new Date();
   const { yyyy, mm, dd, hh, mi, ss } = dateParts(now);
   const dateISO = `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
   const fm = makeFrontMatter({ title: subject, dateISO });
+  // assemble final Markdown
   const contentMd = fm + bodyClean + "\n";
   const slug = toSlug(subject) || "email-post";
   const path = `_posts/${yyyy}-${mm}-${dd}-${slug}.md`;

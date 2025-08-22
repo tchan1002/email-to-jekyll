@@ -1,10 +1,10 @@
 import TurndownService from "turndown";
 import Redis from "ioredis";
 
-// Redis client (Upstash or any hosted Redis). Must be set as env var REDIS_URL (rediss://...)
+// Redis for user lookups
 const redis = new Redis(process.env.REDIS_URL);
 
-// --- helpers ---
+// Helpers
 function jekyllSafeSlug(s) {
   return (s || "post")
     .toLowerCase()
@@ -22,15 +22,14 @@ function firstRecipientToLocal(toField = "") {
 }
 
 async function readBody(req) {
-  // Accept JSON or x-www-form-urlencoded (easiest for SendGrid Inbound)
+  // We’ll support JSON (our curl tests) and URL-encoded forms.
   const ct = req.headers["content-type"] || "";
-  const buf = await new Promise((resolve, reject) => {
+  const text = await new Promise((resolve, reject) => {
     let data = "";
     req.on("data", (c) => (data += c));
-    req.on("end", () => resolve(Buffer.from(data)));
+    req.on("end", () => resolve(data));
     req.on("error", reject);
   });
-  const text = buf.toString("utf8");
 
   if (ct.includes("application/json")) {
     try { return JSON.parse(text || "{}"); } catch { return {}; }
@@ -41,7 +40,11 @@ async function readBody(req) {
     for (const [k, v] of params.entries()) obj[k] = v;
     return obj;
   }
-  // For multipart, you'd parse with a lib like busboy/formidable. v1 keeps it simple.
+
+  // NOTE: SendGrid defaults to multipart/form-data.
+  // To keep v1 simple, set SendGrid Inbound Parse to send
+  // x-www-form-urlencoded (or JSON via a relay) while testing.
+  // We can add multipart parsing next if you’d like.
   return {};
 }
 
@@ -53,21 +56,21 @@ export default async function handler(req, res) {
   try {
     const body = await readBody(req);
 
-    // 1) Recipient -> GitHub login (local-part)
+    // 1) Identify recipient → username (local-part before @)
     const toField = body.to || body.To || body.envelope?.to || body.rcpt_to;
     const rcpt = firstRecipientToLocal(toField);
     if (!rcpt) {
       return res.status(400).json({ error: "Could not parse recipient (To:)" });
     }
-    const login = rcpt.local; // expected to be GitHub username
+    const login = rcpt.local; // expected to be the GitHub username (e.g., tchan1002)
 
-    // 2) Lookup userId via Redis written by Scotty UI: inbound:<login> -> userId
+    // 2) Map recipient → userId from Redis (set by scotty-ui /api/my-inbound)
     const userId = await redis.get(`inbound:${login}`);
     if (!userId) {
       return res.status(404).json({ error: `No user mapping for ${login}@${rcpt.domain}` });
     }
 
-    // 3) Lookup that user's selected repo
+    // 3) Look up that user’s selected repo
     const repo = await redis.get(`selected-repo:${userId}`);
     if (!repo) {
       return res.status(400).json({
@@ -75,24 +78,24 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4) Content
+    // 4) Pull subject/html/text from payload
     const subject = (body.subject || body.Subject || "untitled-post").toString().trim();
     const html = (body.html || body.Html || "").toString();
     const text = (body.text || body.Text || "").toString();
-    const source = html || text || "No content";
 
     // 5) Convert to Markdown
+    const source = html || text || "No content";
     const turndown = new TurndownService();
     const markdownBody = turndown.turndown(source);
 
-    // 6) Build Jekyll file
+    // 6) Build Jekyll filename + front matter
     const today = new Date().toISOString().split("T")[0];
     const safeTitle = jekyllSafeSlug(subject);
     const filename = `_posts/${today}-${safeTitle}.md`;
 
     const fileContent = `---
 layout: post
-title: "${subject.replace(/"/g, '\"')}"
+title: "${subject.replace(/"/g, '\\"')}"
 date: ${today}
 ---
 
@@ -126,6 +129,6 @@ ${markdownBody}
       link: data.content.html_url,
     });
   } catch (err) {
-    return res.status(500).json({ error: err?.message || String(err) });
+    return res.status(500).json({ error: err.message || String(err) });
   }
 }

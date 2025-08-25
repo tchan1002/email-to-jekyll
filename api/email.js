@@ -89,7 +89,7 @@ function makeFrontMatter({ title, dateISO, categories = [] }) {
     "layout: post",
     `title: "${safeTitle}"`,
     `date: ${dateISO} ${TZ}`,
-    `tag: "general"`,
+    `tags: [general]`,
   ];
   if (categories && categories.length) {
     lines.push(`categories: [${categories.map((c) => `"${c}"`).join(", ")}]`);
